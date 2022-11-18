@@ -56,6 +56,20 @@ python train.py --graph_s data_G1 --graph_d data_G2 --anoise 0.2
 
 解释：此命令行运行的代码使用G1和G2（存在0.1的结构差异）来进行节点对齐，并利用有0.2噪音的pre-aligned节点对作为监督信息。
 
+### 训练
+```shell
+sh train.sh
+```
+会按照赛题要求的alpha=,beta顺序进行训练,生成四个独立的预测文件,最后将四个预测文件按序拼接
+提交的文件为`submit.txt`
+
+### tensorboard
+```shell
+cd board
+tensorboard --log_dir=. 
+```
+
+
 ## 参考文献
 + Multilingual Knowledge Graph Embeddings for Cross-lingual Knowledge Alignment (IJCAI17)
 + Cross-lingual Knowledge Graph Alignment via Graph Convolutional Networks (EMNLP18)
