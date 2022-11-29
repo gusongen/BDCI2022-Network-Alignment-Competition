@@ -17,7 +17,7 @@ np.set_printoptions(suppress=True)
 # tensorboard
 from tensorboardX import SummaryWriter
 
-from src.loss import customized_loss, margin_ranking_loss
+from src.loss import customized_loss, margin_ranking_loss , custom_loss_trusted_err
 from src.dataset import Dataset
 from src.layers import GraphConvLayer
 from src.utils import generate_neg_sample, load_data
@@ -66,9 +66,22 @@ graph2 = graph_path_d
 A1, A2, anchor = load_data(graph1=graph1, graph2=graph2, anoise=anoise)
 train_size = int(train_seeds_ratio * len(anchor[:, 0]))
 test_size = len(anchor[:, 0]) - train_size
-train_set, test_set = torch.utils.data.random_split(anchor, lengths=[train_size, test_size])
+train_set, test_set = torch.utils.data.random_split(anchor, lengths=[train_size, test_size], 
+                                                        generator=torch.Generator().manual_seed(43))
+train_size = train_size+90 ####注意这里
+# train_set, test_set = torch.utils.data.random_split(anchor, lengths=[train_size, test_size])
+
 train_set = np.array(list(train_set))
 test_set = np.array(list(test_set))
+print("train_set.shape, test_set.shape: ",train_set.shape, " ",test_set.shape)
+#train_set.shape:(363, 2)   test_set.shape:(91, 2)
+
+trusted_pair = np.loadtxt(f'data/trusted_pair.txt', delimiter=' ') #(90,2)
+
+train_set = np.append(train_set, trusted_pair, axis=0)
+print("**",train_set.shape)
+
+
 batchsize = train_size
 train_dataset = Dataset(train_set)
 train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
@@ -157,6 +170,13 @@ best_E1 = None
 best_E2 = None
 best_hit_1_score = 0
 neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
+
+# trusted_pair = np.loadtxt(f'data/trusted_pair.txt', delimiter=' ')
+err_pair = np.loadtxt(f'data/err_pair.txt', delimiter=' ') #(90,2)
+
+trusted_left, trusted_right = trusted_pair[:,0], trusted_pair[:,1] # (90,) (90,)
+err_left, err_right =  err_pair[:,0], err_pair[:, 1] # (90,) (90,)
+                                       
 for e in range(epoch):
     model.train()
     if e % negiter == 0:
@@ -165,7 +185,21 @@ for e in range(epoch):
         a1_align, a2_align = data
         E1, E2 = model()
         optimizer.zero_grad()
-        loss = customized_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
+        # print("---")
+        # print(E1.shape, E2.shape)             #torch.Size([1135, 128]) torch.Size([1135, 128])
+        # print(a1_align.shape, a2_align.shape) #torch.Size([363]) torch.Size([363])
+        # print(neg1_left.shape, neg1_right.shape)       #(3630,) (3630,)
+        # print("-*-")
+        
+        # loss = customized_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
+        loss = custom_loss_trusted_err(err_left, err_right,
+                                       trusted_left, trusted_right,
+                                       E1, E2, 
+                                       a1_align, a2_align, 
+                                       neg1_left, neg1_right, 
+                                       neg2_left, neg2_right, 
+                                       neg_samples_size=neg_samples_size, 
+                                       neg_param=0.3) # neg_param=0.3 没有使用 
         # loss = margin_ranking_loss(criterion, E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right)
         loss.backward()  # print([x.grad for x in optimizer.param_groups[0]['params']])
         optimizer.step()
