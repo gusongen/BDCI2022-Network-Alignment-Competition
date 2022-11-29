@@ -26,8 +26,19 @@ from src.model import Model
 import logging
 from datetime import datetime
 import time
+import random
 
 EXP_NAME = f'exp_{time.time_ns()}'
+
+def seed(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # dgl.random.seed(seed)
 
 def logger_init(log_file_name='monitor',
                 log_level=logging.DEBUG,
@@ -53,6 +64,7 @@ def logger_init(log_file_name='monitor',
                             )
 
 logger_init()
+seed(2022)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.info(f"current device is {device}")
 
