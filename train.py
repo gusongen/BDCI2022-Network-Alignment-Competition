@@ -171,7 +171,7 @@ for e in range(epoch):
             # todo save model
             print(f"current best Hits@1 count at the {e+1}th epoch: {best_hit_1_score}")
 
-    tb_logger.add_scalar('loss_train', loss.item(), epoch)
+    tb_logger.add_scalar('loss_train', loss.item(), e+1)
     print(f"epoch: {e+1}, loss: {round(loss.item(), 3)}\n")
 
 # final evaluation and test
