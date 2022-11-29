@@ -138,10 +138,11 @@ def evaluate(data, k, sim_measure="cosine", phase="test"):
     hit_1_score = 0
     hit_k_score = 0
     for idx in range(len(data)):
-        gt = data[idx][1]
-        if int(gt) == alignment_hit1[idx]:
+        g1_idx = int(data[idx][0])
+        gt = data[idx][1]  # todo
+        if int(gt) == alignment_hit1[g1_idx]:
             hit_1_score += 1
-        if int(gt) in alignment_hitk[idx]:
+        if int(gt) in alignment_hitk[g1_idx]:
             hit_k_score += 1
     return similarity_matrix, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score
 
