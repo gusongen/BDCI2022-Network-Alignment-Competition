@@ -70,8 +70,7 @@ test_set = np.array(list(test_set))
 batchsize = train_size
 train_dataset = Dataset(train_set)
 train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
-model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
-optimizer = torch.optim.Adagrad(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
 criterion = nn.TripletMarginLoss(margin=3, p=2)
 ############################
 
@@ -164,6 +163,7 @@ for e in range(epoch):
         # loss = margin_ranking_loss(criterion, E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right)
         loss.backward()  # print([x.grad for x in optimizer.param_groups[0]['params']])
         optimizer.step()
+        scheduler.step()
         sim_mat, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score = evaluate(data=test_set, k=k)
 
         if hit_1_score > best_hit_1_score:
