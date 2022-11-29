@@ -23,8 +23,38 @@ from src.layers import GraphConvLayer
 from src.utils import generate_neg_sample, load_data
 from src.model import Model
 
+import logging
+from datetime import datetime
+import time
+
+EXP_NAME = f'exp_{time.time_ns()}'
+
+def logger_init(log_file_name='monitor',
+                log_level=logging.DEBUG,
+                log_dir='./logs/',
+                only_file=False):
+    # 指定路径
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_path = os.path.join(log_dir, log_file_name + '_' + str(datetime.now())[:10] + '_' + EXP_NAME + '.txt')
+    formatter = '[%(asctime)s] - %(levelname)s: %(message)s'
+    if only_file:
+        logging.basicConfig(filename=log_path,
+                            level=log_level,
+                            format=formatter,
+                            datefmt='%Y-%d-%m %H:%M:%S')
+    else:
+        logging.basicConfig(level=log_level,
+                            format=formatter,
+                            datefmt='%Y-%d-%m %H:%M:%S',
+                            handlers=[logging.FileHandler(log_path),
+                                      logging.StreamHandler(sys.stdout)]
+                            )
+
+logger_init()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"current device is {device}")
+logging.info(f"current device is {device}")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=500, help="epoch to run")
@@ -75,9 +105,9 @@ criterion = nn.TripletMarginLoss(margin=3, p=2)
 ############################
 
 pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f'#total params: {pytorch_total_params}')
-print(f"training samples: {train_size}, test samples: {test_size}")
-print(f"model architecture:\n {model}")
+logging.info(f'#total params: {pytorch_total_params}')
+logging.info(f"training samples: {train_size}, test samples: {test_size}")
+logging.info(f"model architecture:\n {model}")
 
 
 def predict(output_file, sim_measure="cosine",):
@@ -114,7 +144,7 @@ def evaluate(data, k, sim_measure="cosine", phase="test"):
     Embedding1 = Embedding1.detach()
     Embedding2 = Embedding2.detach()
     if phase == "over":
-        print(Embedding1)
+        logging.info(Embedding1)
     # step 1: generate sim mat
     if sim_measure == "cosine":
         # similarity_matrix = cosine_similarity(Embedding1, Embedding2)
@@ -169,17 +199,18 @@ for e in range(epoch):
         if hit_1_score > best_hit_1_score:
             best_hit_1_score = hit_1_score
             # todo save model
-            print(f"current best Hits@1 count at the {e+1}th epoch: {best_hit_1_score}")
+            logging.info(
+                f"current best Hits@1 count {hit_1_score}({round(hit_1_score/len(test_set), 2)}) ,hit@{k}: total {hit_k_score}({round(hit_k_score/len(test_set), 2)}) at the {e+1}th epoch: {best_hit_1_score}")
 
-    tb_logger.add_scalar('loss_train', loss.item(), e+1)
-    print(f"epoch: {e+1}, loss: {round(loss.item(), 3)}\n")
+    tb_logger.add_scalar('loss_train', loss.item(), e + 1)
+    logging.info(f"epoch: {e+1}, loss: {round(loss.item(), 3)}\n")
 
 # final evaluation and test
 # ground_truth = np.loadtxt('ground_truth.txt', delimiter=' ')
 # ground_truth = np.loadtxt('data/anchor/anchor_0.2_test.txt', delimiter=' ')
 # similarity_matrix, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score = evaluate(data=ground_truth, k=k, phase="over")
-# print(similarity_matrix)
-# print(f"final score: hit@1: total {hit_1_score} and ratio {round(hit_1_score/len(ground_truth), 2)}, hit@{k}: total {hit_k_score} and ratio {round(hit_k_score/len(ground_truth), 2)}")
+# logging.info(similarity_matrix)
+# logging.info(f"final score: hit@1: total {hit_1_score} and ratio {round(hit_1_score/len(ground_truth), 2)}, hit@{k}: total {hit_k_score} and ratio {round(hit_k_score/len(ground_truth), 2)}")
 
 # 写入文件
 predict(f'submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}.txt',)
