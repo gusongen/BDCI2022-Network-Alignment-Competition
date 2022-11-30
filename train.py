@@ -17,7 +17,7 @@ np.set_printoptions(suppress=True)
 # tensorboard
 from tensorboardX import SummaryWriter
 
-from src.loss import customized_loss, margin_ranking_loss
+from src.loss import customized_loss, margin_ranking_loss, customized_loss_repeat_loss
 from src.dataset import Dataset
 from src.layers import GraphConvLayer
 from src.utils import generate_neg_sample, load_data
@@ -225,7 +225,7 @@ def train(model, optimizer, scheduler, train_set, test_set, train_loader, base_r
             a1_align, a2_align = data
             E1, E2 = model()
             optimizer.zero_grad()
-            loss = customized_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
+            loss = customized_loss_repeat_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
             # loss = margin_ranking_loss(criterion, E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right)
             loss.backward()  # print([x.grad for x in optimizer.param_groups[0]['params']])
             optimizer.step()
