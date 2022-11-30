@@ -1,1 +1,14 @@
-src/__pycache__
+**/__pycache__
+*.png
+*.txt
+*.pt
+board
+log
+logging_data
+.vscode
+src/gcn_lib
+.*.py
+.*.sh
+configs.yml
+data
+.gitignore

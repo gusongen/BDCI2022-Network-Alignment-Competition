@@ -27,6 +27,7 @@ import logging
 from datetime import datetime
 import time
 import random
+import sys
 
 EXP_NAME = f'exp_{time.time_ns()}'
 
@@ -69,7 +70,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.info(f"current device is {device}")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--epoch", type=int, default=500, help="epoch to run")
+parser.add_argument("--epoch", type=int, default=20, help="epoch to run")
 parser.add_argument("--seed", type=int, default=8, help="training set ratio")
 parser.add_argument('--hidden', type=int, default=128, help="hidden dimension of entity embeddings")
 parser.add_argument('--lr', type=float, default=0.01, help="learning rate")
@@ -81,6 +82,8 @@ parser.add_argument('--graph_s', type=str, default="data_G1", help="source graph
 parser.add_argument('--graph_d', type=str, default="data_G2", help="destination graph path")
 parser.add_argument('--anoise', type=float, default=0.2, help="anchor noise")
 parser.add_argument('--board_path', type=str, default='board', help="tensorboard path")
+parser.add_argument('--lr_adjust_freq', default=100, type=int, help='decay lr after certain number of epoch')
+parser.add_argument('--lr_decay_rate', default=0.8, type=float, help='learning rate decay')
 args = parser.parse_args()
 
 ############################
@@ -112,6 +115,8 @@ test_set = np.array(list(test_set))
 batchsize = train_size
 train_dataset = Dataset(train_set)
 train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
+model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
+optimizer = torch.optim.Adagrad(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
 criterion = nn.TripletMarginLoss(margin=3, p=2)
 ############################
