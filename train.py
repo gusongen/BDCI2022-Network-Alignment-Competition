@@ -327,7 +327,7 @@ if __name__ == '__main__':
     # )
     # soft voting
     for fold in range(args.cv):
-        sim_fold = np.loadtxt(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}_sim.npy', delimiter=' ')
+        sim_fold = np.load(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}_sim.npy')
         predicts.append(sim_fold)
     predicts = np.array(predicts)
     predicts = predicts.sum(axis=0).argmax(axis=1)
