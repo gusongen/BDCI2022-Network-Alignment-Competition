@@ -100,7 +100,8 @@ train_seeds_ratio = args.seed * 0.1
 k = args.k
 anoise = args.anoise
 ############################
-tb_logger = SummaryWriter(args.board_path)
+os.makedirs(args.board_path + '/' + EXP_NAME, exist_ok=True)
+tb_logger = SummaryWriter(args.board_path + '/' + EXP_NAME)
 
 ############################
 # preprocess
