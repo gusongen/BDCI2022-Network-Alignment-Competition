@@ -119,7 +119,7 @@ train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=F
 model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
 optimizer = torch.optim.Adagrad(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
-criterion = nn.TripletMarginLoss(margin=3, p=2)
+# criterion = nn.TripletMarginLoss(margin=3, p=2)
 ############################
 
 pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
