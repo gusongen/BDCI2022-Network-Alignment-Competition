@@ -28,8 +28,10 @@ from datetime import datetime
 import time
 import random
 import sys
+from sklearn.model_selection import KFold
 
 EXP_NAME = f'exp_{time.time_ns()}'
+
 
 def seed(seed=0):
     random.seed(seed)
@@ -40,6 +42,7 @@ def seed(seed=0):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     # dgl.random.seed(seed)
+
 
 def logger_init(log_file_name='monitor',
                 log_level=logging.DEBUG,
@@ -64,6 +67,7 @@ def logger_init(log_file_name='monitor',
                                       logging.StreamHandler(sys.stdout)]
                             )
 
+
 logger_init()
 seed(2022)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -84,6 +88,7 @@ parser.add_argument('--anoise', type=float, default=0.2, help="anchor noise")
 parser.add_argument('--board_path', type=str, default='board', help="tensorboard path")
 parser.add_argument('--lr_adjust_freq', default=100, type=int, help='decay lr after certain number of epoch')
 parser.add_argument('--lr_decay_rate', default=0.8, type=float, help='learning rate decay')
+parser.add_argument('--cv', default=10, type=int help='k-fold cross validation')
 args = parser.parse_args()
 
 ############################
@@ -108,27 +113,10 @@ tb_logger = SummaryWriter(args.board_path + '/' + EXP_NAME)
 graph1 = graph_path_s
 graph2 = graph_path_d
 A1, A2, anchor = load_data(graph1=graph1, graph2=graph2, anoise=anoise)
-train_size = int(train_seeds_ratio * len(anchor[:, 0]))
-test_size = len(anchor[:, 0]) - train_size
-train_set, test_set = torch.utils.data.random_split(anchor, lengths=[train_size, test_size])
-train_set = np.array(list(train_set))
-test_set = np.array(list(test_set))
-batchsize = train_size
-train_dataset = Dataset(train_set)
-train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
-model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
-optimizer = torch.optim.Adagrad(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
-# criterion = nn.TripletMarginLoss(margin=3, p=2)
-############################
-
-pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-logging.info(f'#total params: {pytorch_total_params}')
-logging.info(f"training samples: {train_size}, test samples: {test_size}")
-logging.info(f"model architecture:\n {model}")
 
 
-def predict(output_file, sim_measure="cosine",):
+
+def predict(model, output_file, sim_measure="cosine",):
     """
     将预测写入文件
     """
@@ -156,7 +144,7 @@ def predict(output_file, sim_measure="cosine",):
         file.write(f'{idx0} {idx}\n')
 
 
-def evaluate(data, k, sim_measure="cosine", phase="test"):
+def evaluate(model, data, k, sim_measure="cosine", phase="test"):
     model.eval()
     Embedding1, Embedding2 = model()
     Embedding1 = Embedding1.detach()
@@ -194,34 +182,35 @@ def evaluate(data, k, sim_measure="cosine", phase="test"):
     return similarity_matrix, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score
 
 
-# begin training
-best_E1 = None
-best_E2 = None
-best_hit_1_score = 0
-neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
-for e in range(epoch):
-    model.train()
-    if e % negiter == 0:
-        neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
-    for _, data in enumerate(train_loader):
-        a1_align, a2_align = data
-        E1, E2 = model()
-        optimizer.zero_grad()
-        loss = customized_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
-        # loss = margin_ranking_loss(criterion, E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right)
-        loss.backward()  # print([x.grad for x in optimizer.param_groups[0]['params']])
-        optimizer.step()
-        scheduler.step()
-        sim_mat, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score = evaluate(data=test_set, k=k)
+def train(model, optimizer, scheduler, train_set, test_set, train_loader):
+    # begin training
+    best_E1 = None
+    best_E2 = None
+    best_hit_1_score = 0
+    neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
+    for e in range(epoch):
+        model.train()
+        if e % negiter == 0:
+            neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
+        for _, data in enumerate(train_loader):
+            a1_align, a2_align = data
+            E1, E2 = model()
+            optimizer.zero_grad()
+            loss = customized_loss(E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right, neg_samples_size=neg_samples_size, neg_param=0.3)
+            # loss = margin_ranking_loss(criterion, E1, E2, a1_align, a2_align, neg1_left, neg1_right, neg2_left, neg2_right)
+            loss.backward()  # print([x.grad for x in optimizer.param_groups[0]['params']])
+            optimizer.step()
+            scheduler.step()
+            sim_mat, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score = evaluate(model, data=test_set, k=k)
 
-        if hit_1_score > best_hit_1_score:
-            best_hit_1_score = hit_1_score
-            # todo save model
-            logging.info(
-                f"current best Hits@1 count {hit_1_score}({round(hit_1_score/len(test_set), 2)}) ,hit@{k}: total {hit_k_score}({round(hit_k_score/len(test_set), 2)}) at the {e+1}th epoch: {best_hit_1_score}")
+            if hit_1_score > best_hit_1_score:
+                best_hit_1_score = hit_1_score
+                # todo save model
+                logging.info(
+                    f"current best Hits@1 count {hit_1_score}({round(hit_1_score/len(test_set), 2)}) ,hit@{k}: total {hit_k_score}({round(hit_k_score/len(test_set), 2)}) at the {e+1}th epoch: {best_hit_1_score}")
 
-    tb_logger.add_scalar('loss_train', loss.item(), e + 1)
-    logging.info(f"epoch: {e+1}, loss: {round(loss.item(), 3)}\n")
+        tb_logger.add_scalar('loss_train', loss.item(), e + 1)
+        logging.info(f"epoch: {e+1}, loss: {round(loss.item(), 3)}\n")
 
 # final evaluation and test
 # ground_truth = np.loadtxt('ground_truth.txt', delimiter=' ')
@@ -230,5 +219,47 @@ for e in range(epoch):
 # logging.info(similarity_matrix)
 # logging.info(f"final score: hit@1: total {hit_1_score} and ratio {round(hit_1_score/len(ground_truth), 2)}, hit@{k}: total {hit_k_score} and ratio {round(hit_k_score/len(ground_truth), 2)}")
 
-# 写入文件
-predict(f'submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}.txt',)
+
+if __name__ == '__main__':
+
+    os.makedirs('kfoldCV', exist_ok=True)
+    import numpy as np
+
+    kf = KFold(n_splits=args.cv)
+    kf.get_n_splits(anchor)
+
+    print(kf)
+
+    for train_index, test_index in kf.split(X):
+        print("TRAIN:", train_index, "TEST:", test_index)
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+
+    train_size = int(train_seeds_ratio * len(anchor[:, 0]))
+    test_size = len(anchor[:, 0]) - train_size
+    train_set, test_set = torch.utils.data.random_split(anchor, lengths=[train_size, test_size])
+    train_set = np.array(list(train_set))
+    test_set = np.array(list(test_set))
+    batchsize = train_size
+    train_dataset = Dataset(train_set)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
+    model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
+    optimizer = torch.optim.Adagrad(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
+    # criterion = nn.TripletMarginLoss(margin=3, p=2)
+    ############################
+
+    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logging.info(f'#total params: {pytorch_total_params}')
+    logging.info(f"training samples: {train_size}, test samples: {test_size}")
+    logging.info(f"model architecture:\n {model}")
+
+    train(model=model, optimizer=optimizer, scheduler=scheduler, train_set=train_set, test_set=test_set, train_loader=train_loader)
+
+    # 写入文件
+    predict(model, f'submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}.txt',)
+
+
+# 思路1.用k折的emb计算相似度
+# 思路2.每个节点voting
+# 存可信的
