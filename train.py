@@ -114,6 +114,13 @@ graph1 = graph_path_s
 graph2 = graph_path_d
 A1, A2, anchor = load_data(graph1=graph1, graph2=graph2, anoise=anoise)
 
+def generate_train_set_with_threashold(train_set,a1_embedding,a2_embedding,rate=1):
+    similarity_martix=a1_embedding.detach().numpy().dot(a2_embedding.detach().numpy().T)
+    thresholded_align=(-similarity_martix[train_set[:,0].astype('int'),train_set[:,1].astype('int')]).argsort()[:int(len(train_set)*rate)]
+    # tmp=-similarity_martix[train_set[:,0].astype('int'),train_set[:,1].astype('int')];tmp.sort()
+    # print(tmp) #debug
+    return train_set[thresholded_align]
+
 
 def predict(model, output_file, sim_measure="cosine", save_emb=False, save_sim=False):
     """
@@ -192,16 +199,26 @@ def evaluate(model, data, k, sim_measure="cosine", phase="test", add_trust=False
     return similarity_matrix, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score
 
 
-def train(model, optimizer, scheduler, train_set, test_set, train_loader):
+def train(model, optimizer, scheduler, train_set, test_set, train_loader, base_rate=0.2, max_rate=0.8, rateiter=100):
     # begin training
     best_E1 = None
     best_E2 = None
     best_hit_1_score = 0
     best_hit_1_epoch = 0
     # best_alignment=None
+    rate = base_rate
+    train_set_ori=train_set.copy()
     neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
     for e in range(epoch):
         model.train()
+        if e != 0 and e % rateiter == 0: # no threashold at beginning
+            rate = min(2 * rate, max_rate)
+            # change train_set
+            E1, E2 = model()
+            train_set=generate_train_set_with_threashold(train_set_ori,E1,E2,rate=rate)
+            print('@len train set',train_set.shape)
+            neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
+            train_loader = DataLoader(dataset=Dataset(train_set), batch_size=len(train_set), shuffle=False)
         if e % negiter == 0:
             neg1_left, neg1_right, neg2_left, neg2_right = generate_neg_sample(train_set, neg_samples_size=neg_samples_size)
         for _, data in enumerate(train_loader):
@@ -247,96 +264,31 @@ if __name__ == '__main__':
     kf.get_n_splits(anchor)
 
     logging.info(f'@kf = {args.cv}')
-    trust_set = set()
-    hit1, hitk = [], []
-    for fold, (train_index, test_index) in enumerate(kf.split(anchor)):
-        logging.info('=' * 40 + f'fold {fold+1}' + '=' * 40)
-        logging.info("TRAIN:" + str(train_index) + "TEST:" + str(test_index))
+    fold = 0
+    logging.info('=' * 40 + f'fold {fold+1}' + '=' * 40)
 
-        # diff tb
-        board_path = args.board_path + '/' + EXP_NAME + f'_fold{fold}'
-        os.makedirs(board_path, exist_ok=True)
-        tb_logger = SummaryWriter(board_path)
-        # dataset
-        train_set, test_set = anchor[train_index], anchor[test_index]
-        train_set, test_set = np.array(list(train_set)), np.array(list(test_set))
-        train_size, test_size = len(train_set), len(test_set)
-        batchsize = len(train_set)
-        train_dataset = Dataset(train_set)
-        train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
-        model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
-        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
-        logging.info(f"training samples: {train_size}, test samples: {test_size}")
-        if fold == 0:
-            pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            logging.info(f'#total params: {pytorch_total_params}')
-            logging.info(f"model architecture:\n {model}")
+    # diff tb
+    board_path = args.board_path + '/' + EXP_NAME + f'_fold{fold}'
+    os.makedirs(board_path, exist_ok=True)
+    tb_logger = SummaryWriter(board_path)
+    # dataset
+    train_set = np.loadtxt('pseudo_label.txt', delimiter=' ', dtype='int')
+    test_set = anchor
+    train_set, test_set = np.array(list(train_set)), np.array(list(test_set))
+    train_size, test_size = len(train_set), len(test_set)
+    batchsize = len(train_set)
+    train_dataset = Dataset(train_set)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batchsize, shuffle=False)
+    model = Model(Variable(torch.from_numpy(A1).float()), Variable(torch.from_numpy(A2).float()), embedding_dim=embedding_dim)
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_adjust_freq, args.lr_decay_rate)
+    logging.info(f"training samples: {train_size}, test samples: {test_size}")
+    if fold == 0:
+        pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logging.info(f'#total params: {pytorch_total_params}')
+        logging.info(f"model architecture:\n {model}")
 
-        train(model=model, optimizer=optimizer, scheduler=scheduler, train_set=train_set, test_set=test_set, train_loader=train_loader)
-        # 预测写入文件+emb写入文件
-        # todo不用最后的emb,用预测结果最好的
-        model = torch.load('model_best.pth')
-        predict(model, f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}.txt',save_sim=True)
-
-        # save trust
-        similarity_matrix, alignment_hit1, alignment_hitk, hit_1_score, hit_k_score = evaluate(model, data=test_set, k=k, trust_set=trust_set, add_trust=True)
-        hit1.append(hit_1_score / len(test_set))
-        hitk.append(hit_k_score / len(test_set))
-
-    logging.info(
-        f"avg Hits@1 score ({round(np.mean(hit1), 2)}) , avg hit@{k}: {round(np.mean(hitk), 2)})")
-    trust_set = list(trust_set)  # sort by first key auto
-    with open("data/anchor/trust_anchor.txt", 'w') as file:
-        for a, b in trust_set:
-            file.write(f'{a} {b}\n')
-    # # todo avg emb
-    # emb1_fold, emb2_fold = [], []
-    # for fold in range(args.cv):
-    #     emb1_fold.append(np.load(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}_emb1.npy'))
-    #     emb2_fold.append(np.load(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}_emb2.npy'))
-    # emb1_fold = np.array(emb1_fold)
-    # emb2_fold = np.array(emb2_fold)
-    # emb1_avg = np.mean(emb1_fold, axis=0)
-    # emb2_avg = np.mean(emb2_fold, axis=0)
-    # # similarity_matrix = cosine_similarity(Embedding1, Embedding2)
-    # similarity_matrix = emb1_avg.dot(emb2_avg.T)
-    # with open(f"kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+avg_emb.txt", 'w') as file:
-    #     for idx0, line in enumerate(similarity_matrix):
-    #         idx = np.argmax(line)
-    #         idx = int(idx)
-    #         # alignment_hit1.append(idx)
-    #         file.write(f'{idx0} {idx}\n')
-    # todo soft voting
-    predicts = []
-    # hard voting
-    # for fold in range(args.cv):
-    #     p_fold = np.loadtxt(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}.txt', delimiter=' ', dtype='int')[:, 1]
-    #     predicts.append(p_fold)
-    # predicts = np.array(predicts)
-    # predicts = np.apply_along_axis(
-    #     lambda x: np.argmax(np.bincount(x,)),
-    #     axis=0,
-    #     arr=predicts,
-    # )
-    # predicts = np.array(predicts)
-    # predicts = np.apply_along_axis(
-    #     lambda x: np.argmax(np.bincount(x,)),
-    #     axis=0,
-    #     arr=predicts,
-    # )
-    # soft voting
-    for fold in range(args.cv):
-        sim_fold = np.load(f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}_sim.npy')
-        predicts.append(sim_fold)
-    predicts = np.array(predicts)
-    predicts = predicts.sum(axis=0).argmax(axis=1)
-    with open(f"kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+voting.txt", 'w') as file:
-        for idx0, idx in enumerate(predicts):
-            idx = int(idx)
-            # alignment_hit1.append(idx)
-            file.write(f'{idx0} {idx}\n')
-# 思路1.用k折的emb计算相似度 done
-# 思路2.每个节点voting done
-# 存可信的 done
-# 平均hit done
+    train(model=model, optimizer=optimizer, scheduler=scheduler, train_set=train_set, test_set=test_set, train_loader=train_loader)
+    # 预测写入文件+emb写入文件
+    model = torch.load('model_best.pth')
+    predict(model, f'kfoldCV/submit_tmp_{args.graph_s}_{args.graph_d}_{anoise}+fold{fold}.txt', save_sim=True)
