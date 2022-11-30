@@ -2,7 +2,7 @@
 *.png
 *.txt
 *.pt
-board
+board*
 log
 logging_data
 .vscode
@@ -12,3 +12,6 @@ src/gcn_lib
 configs.yml
 data
 .gitignore
+*.ipynb
+*.npy
+*.pth
